@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(mkdir -p .claude && echo '{\"version\": \"0.0.1\", \"configurations\": [{\"name\": \"dev\", \"runtimeExecutable\": \"npm\", \"runtimeArgs\": [\"run\", \"dev\"], \"port\": 3000}]}' > .claude/launch.json)"
+    ]
+  }
+}
