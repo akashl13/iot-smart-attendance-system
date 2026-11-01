@@ -15,6 +15,7 @@ import {
   LogOut,
   Menu,
   Radio,
+  Search,
   ScanLine,
   Settings,
   Sparkles,
@@ -158,6 +159,8 @@ function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
   const clock = useClock();
   const unread = useUnread();
   const noticeHref =
@@ -168,6 +171,23 @@ function AppShell({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+  const quickLinks = sections.flatMap((section) => section.links);
+  const matchingLinks = quickLinks.filter((link) =>
+    link.label.toLowerCase().includes(commandQuery.trim().toLowerCase()),
+  );
+
+  useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen((value) => !value);
+        setCommandQuery("");
+      }
+      if (event.key === "Escape") setCommandOpen(false);
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
@@ -177,6 +197,7 @@ function AppShell({
 
   const sidebar = (
     <div
+      className="app-shell-sidebar"
       style={{
         display: "flex",
         height: "100%",
@@ -616,6 +637,15 @@ function AppShell({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <button
+              className="shell-quick-search"
+              onClick={() => { setCommandQuery(""); setCommandOpen(true); }}
+              aria-label="Quick navigation"
+            >
+              <Search size={16} />
+              <span>Quick find</span>
+              <kbd>Ctrl K</kbd>
+            </button>
             {/* Notifications */}
             <Link
               href={noticeHref}
@@ -744,6 +774,42 @@ function AppShell({
           {children}
         </main>
       </div>
+
+      <AnimatePresence>
+        {commandOpen && (
+          <motion.div className="command-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setCommandOpen(false); }}>
+            <motion.section
+              className="command-palette"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Quick navigation"
+              initial={{ opacity: 0, y: -14, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.985 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+            >
+              <label className="command-input-wrap">
+                <Search size={19} />
+                <input autoFocus value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} placeholder="Search pages and tools…" />
+                <kbd>ESC</kbd>
+              </label>
+              <p className="command-label">{commandQuery ? "Matching pages" : "Jump to"}</p>
+              <div className="command-results">
+                {matchingLinks.map((link) => {
+                  const Icon = link.icon;
+                  return (
+                    <Link key={link.href} href={link.href} className="command-result" onClick={() => setCommandOpen(false)}>
+                      <span><Icon size={17} /></span>{link.label}<kbd>↵</kbd>
+                    </Link>
+                  );
+                })}
+                {!matchingLinks.length && <p className="command-empty">No pages found for “{commandQuery}”.</p>}
+              </div>
+              <footer className="command-footer">Navigate SmartAttend <span>ESC to close</span></footer>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Mobile bottom navigation — Apple tab bar style */}
       <nav

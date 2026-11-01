@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, Clock3, Percent, UserX, Users } from "lucide-react";
+import { CalendarCheck, Clock3, Percent, RefreshCw, UserX, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BarBlock, TrendChart } from "@/components/charts";
 import { ChartCard, DashboardCard, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
@@ -21,16 +21,21 @@ type Dashboard = {
 
 export default function StudentDashboardPage() {
   const [month, setMonth] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<Dashboard | null>(null);
   useEffect(() => {
+    let active = true;
     const query = month ? `?month=${month}` : "";
-    api<{ analytics: Dashboard }>(`/api/analytics/student${query}`).then((res) => { setData(res.analytics); if (!month) setMonth(res.analytics.month); }).catch(() => undefined);
-  }, [month]);
+    setRefreshing(true);
+    api<{ analytics: Dashboard }>(`/api/analytics/student${query}`).then((res) => { if (!active) return; setData(res.analytics); if (!month) setMonth(res.analytics.month); }).catch(() => undefined).finally(() => { if (active) setRefreshing(false); });
+    return () => { active = false; };
+  }, [month, refreshKey]);
   const cells = useMemo(() => buildCalendar(data?.month || month, data?.calendar || []), [data, month]);
   if (!data) return <LoadingState label="Loading your attendance" />;
   return (
     <div>
-      <PageHeader eyebrow={data.profile.studentId} title={`Welcome, ${data.profile.name.split(" ")[0]}`} subtitle={`${data.profile.course} · Semester ${data.profile.semester}${data.profile.section} · ${data.profile.department}`} action={<StatusBadge status={data.profile.rfidStatus} />} />
+      <PageHeader eyebrow={data.profile.studentId} title={`Welcome, ${data.profile.name.split(" ")[0]}`} subtitle={`${data.profile.course} · Semester ${data.profile.semester}${data.profile.section} · ${data.profile.department}`} action={<div className="student-dashboard-actions"><StatusBadge status={data.profile.rfidStatus} /><button className="btn btn-secondary btn-sm student-refresh" onClick={() => setRefreshKey((value) => value + 1)} disabled={refreshing}><RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />{refreshing ? "Updating" : "Refresh"}</button></div>} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <DashboardCard label="Attendance" value={`${data.stats.percentage}%`} hint={`Policy ${data.threshold}%`} icon={<Percent size={18} />} />
         <DashboardCard label="Present days" value={data.stats.present} icon={<CalendarCheck size={18} />} delay={0.04} />
