@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   ArrowRight,
   BarChart3,
@@ -21,7 +21,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 /* ─── Data ─────────────────────────────────────────────── */
 const navLinks = [
@@ -306,10 +306,6 @@ function AttendanceChart() {
 /* ─── Main component ────────────────────────────────────── */
 export function LandingPage() {
   const [open, setOpen] = useState(false);
-  const heroRef = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
-  const heroOpacity = useTransform(scrollYProgress, [0, 1], [1, 0]);
-  const heroY = useTransform(scrollYProgress, [0, 1], [0, 60]);
 
   return (
     <div className="landing-root" style={{ minHeight: "100vh", background: "#f5f5f7", color: "#1d1d1f", overflowX: "hidden" }}>
@@ -317,7 +313,6 @@ export function LandingPage() {
 
       {/* ── HERO ──────────────────────────────────────────── */}
       <motion.section
-        ref={heroRef}
         style={{
           minHeight: "100svh",
           display: "flex",
@@ -341,10 +336,10 @@ export function LandingPage() {
 
         <div style={{ maxWidth: "1100px", margin: "0 auto", width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4rem", alignItems: "center" }} className="hero-grid-cols">
           {/* Left */}
-          <motion.div style={{ opacity: heroOpacity, y: heroY }}>
+          <motion.div>
             <motion.div
               variants={stagger}
-              initial="hidden"
+              initial={false}
               animate="show"
             >
               <motion.div variants={fadeUp} style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", background: "rgba(0,113,227,0.12)", border: "1px solid rgba(0,113,227,0.25)", borderRadius: "980px", padding: "0.3rem 0.875rem", marginBottom: "2rem" }}>
@@ -427,7 +422,7 @@ export function LandingPage() {
 
           {/* Right — RFID mockup */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3, ease: "easeOut" }}
             style={{ display: "flex", justifyContent: "center" }}
@@ -455,7 +450,7 @@ export function LandingPage() {
         <div style={{ maxWidth: "1100px", margin: "0 auto" }}>
           <motion.div
             variants={stagger}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-80px" }}
             style={{ textAlign: "center", marginBottom: "4rem" }}
@@ -477,7 +472,7 @@ export function LandingPage() {
               <motion.div
                 key={step}
                 variants={fadeUp}
-                initial="hidden"
+                initial={false}
                 whileInView="show"
                 viewport={{ once: true, margin: "-60px" }}
                 transition={{ delay: i * 0.1 }}
@@ -506,7 +501,7 @@ export function LandingPage() {
           {/* Visual */}
           <motion.div
             variants={fadeUp}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-80px" }}
           >
@@ -539,7 +534,7 @@ export function LandingPage() {
           {/* Text */}
           <motion.div
             variants={stagger}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-80px" }}
           >
@@ -578,7 +573,7 @@ export function LandingPage() {
           {/* Text */}
           <motion.div
             variants={stagger}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-80px" }}
           >
@@ -604,7 +599,7 @@ export function LandingPage() {
           {/* Chart */}
           <motion.div
             variants={fadeUp}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-80px" }}
           >
@@ -618,7 +613,7 @@ export function LandingPage() {
         <div style={{ maxWidth: "1100px", margin: "0 auto" }}>
           <motion.div
             variants={stagger}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-80px" }}
             style={{ marginBottom: "4rem" }}
@@ -636,7 +631,7 @@ export function LandingPage() {
               <motion.div
                 key={title}
                 variants={fadeUp}
-                initial="hidden"
+                initial={false}
                 whileInView="show"
                 viewport={{ once: true, margin: "-40px" }}
                 transition={{ delay: (i % 4) * 0.06 }}
@@ -665,7 +660,7 @@ export function LandingPage() {
 
         <motion.div
           variants={stagger}
-          initial="hidden"
+          initial={false}
           whileInView="show"
           viewport={{ once: true }}
           style={{ maxWidth: "600px", margin: "0 auto", position: "relative" }}
