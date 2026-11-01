@@ -36,3 +36,6 @@ Thumbs.db
 
 # Drizzle
 drizzle/meta/*.json
+
+.vercel
+.env*

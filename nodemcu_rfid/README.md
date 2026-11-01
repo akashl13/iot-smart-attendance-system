@@ -14,10 +14,10 @@ Firmware for the NodeMCU ESP8266 (ESP-12E) and RC522. This sketch uses the exist
 | RC522 3.3V | 3V3 |
 | RC522 GND | GND |
 | RC522 IRQ | Not connected |
-| Green LED anode | D1 / GPIO5 through 220-330 ohm resistor |
+| Green LED anode | D2 / GPIO4 through 220-330 ohm resistor |
 | Green LED cathode | GND |
 
-The RC522 is a 3.3V device. Never connect it to VIN/5V. Disconnect RC522 RST from D3 while flashing if the board will not enter bootloader mode. The sketch also retains the optional ready LED on D2/GPIO4 from the previous firmware; leave it disconnected if it is not installed.
+The RC522 is a 3.3V device. Never connect it to VIN/5V. Disconnect RC522 RST from D3 while flashing if the board will not enter bootloader mode.
 
 ## Install And Configure
 
@@ -152,6 +152,6 @@ Example heartbeat response:
 - **Device authentication failed:** If the backend has `DEVICE_API_KEY` set, configure the same key locally in ignored `secrets.h`; never commit it.
 - **Reader is unknown or not trusted:** Provision `NODEMCU-01` in Admin > IoT Devices and set its trust state to Active.
 - **Unknown card:** Register the card to an active student in RFID Cards. The firmware does not contain student UIDs or names.
-- **No green LED:** The LED intentionally stays off for cooldown duplicates, unknown/blocked cards, untrusted readers, HTTP errors, malformed responses, and timeouts. Check Serial Monitor for the backend result. Verify LED polarity and the resistor on D1/GPIO5.
+- **Green LED feedback:** D2/GPIO4 flashes briefly for newly recorded attendance and stays on longer for an unregistered card. Cooldown duplicates and other failures do not flash it. Check Serial Monitor for the backend result and verify LED polarity and the series resistor.
 
 The firmware was compiled for NodeMCU ESP-12E in the repository toolchain. Physical Wi-Fi/RFID behavior still requires the actual board and reader; no hardware is attached to this Codespace.

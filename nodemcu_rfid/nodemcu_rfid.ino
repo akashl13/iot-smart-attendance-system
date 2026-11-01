@@ -28,6 +28,7 @@
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
+#include <WiFiClientSecureBearSSL.h>
 #include <ESP8266WiFiMulti.h>
 #include <MFRC522.h>
 #include <SPI.h>
@@ -46,6 +47,9 @@
 #ifndef SMARTATTEND_DEVICE_API_KEY
 #define SMARTATTEND_DEVICE_API_KEY ""
 #endif
+#ifndef SMARTATTEND_VERCEL_BYPASS_KEY
+#define SMARTATTEND_VERCEL_BYPASS_KEY ""
+#endif
 
 struct WifiNetwork {
   const char* ssid;
@@ -60,26 +64,51 @@ const WifiNetwork WIFI_NETWORKS[] = {
 };
 const size_t WIFI_NETWORK_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
 
-// Matches the previously supplied laptop host and the reader's current
-// 192.168.137.x subnet. Verify the host IP before upload. Never use localhost.
-const char* SERVER_HOST = "192.168.137.1";
-const uint16_t SERVER_PORT = 3000;
-const char* SERVER_PROTOCOL = "http";
+// Vercel production endpoint. The HTTP client validates the certificate chain.
+const char* SERVER_HOST = "smartattend-iot.vercel.app";
+const uint16_t SERVER_PORT = 443;
+const char* SERVER_PROTOCOL = "https";
 
 const char* DEVICE_ID = "NODEMCU-01";
 const char* FIRMWARE_VERSION = "1.5.0";
 // Leave empty unless the backend has DEVICE_API_KEY configured, then set the same
 // value locally. Do not commit a real key.
 const char* DEVICE_API_KEY = SMARTATTEND_DEVICE_API_KEY;
+const char* VERCEL_BYPASS_KEY = SMARTATTEND_VERCEL_BYPASS_KEY;
+
+// GlobalSign Root CA, the verified root for the current Vercel *.vercel.app
+// certificate chain (GlobalSign -> GTS Root R1 -> WR1). NTP time must be valid
+// before TLS starts so BearSSL can check certificate validity dates.
+static const char VERCEL_ROOT_CA[] PROGMEM = R"CERT(
+-----BEGIN CERTIFICATE-----
+MIIDdTCCAl2gAwIBAgILBAAAAAABFUtaw5QwDQYJKoZIhvcNAQEFBQAwVzELMAkGA1UEBhMCQkUx
+GTAXBgNVBAoTEEdsb2JhbFNpZ24gbnYtc2ExEDAOBgNVBAsTB1Jvb3QgQ0ExGzAZBgNVBAMTEkds
+b2JhbFNpZ24gUm9vdCBDQTAeFw05ODA5MDExMjAwMDBaFw0yODAxMjgxMjAwMDBaMFcxCzAJBgNV
+BAYTAkJFMRkwFwYDVQQKExBHbG9iYWxTaWduIG52LXNhMRAwDgYDVQQLEwdSb290IENBMRswGQYD
+VQQDExJHbG9iYWxTaWduIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDa
+DuaZjc6j40+Kfvvxi4Mla+pIH/EqsLmVEQS98GPR4mdmzxzdzxtIK+6NiY6arymAZavpxy0Sy6sc
+THAHoT0KMM0VjU/43dSMUBUc71DuxC73/OlS8pF94G3VNTCOXkNz8kHp1Wrjsok6Vjk4bwY8iGlb
+Kk3Fp1S4bInMm/k8yuX9ifUSPJJ4ltbcdG6TRGHRjcdGsnUOhugZitVtbNV4FpWi6cgKOOvyJBNP
+c1STE4U6G7weNLWLBYy5d4ux2x8gkasJU26Qzns3dLlwR5EiUWMWea6xrkEmCMgZK9FGqkjWZCrX
+gzT/LCrBbBlDSgeF59N89iFo7+ryUp9/k5DPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBRge2YaRQ2XyolQL30EzTSo//z9SzANBgkqhkiG9w0BAQUF
+AAOCAQEA1nPnfE920I2/7LqivjTFKDK1fPxsnCwrvQmeU79rXqoRSLblCKOzyj1hTdNGCbM+w6Dj
+Y1Ub8rrvrTnhQ7k4o+YviiY776BQVvnGCv04zcQLcFGUl5gE38NflNUVyRRBnMRddWQVDf9VMOyG
+j/8N7yy5Y0b2qvzfvGn9LhJIZJrglfCm7ymPAbEVtQwdpf5pLGkkeB6zpxxxYu7KyJesF12KwvhH
+hm4qxFYxldBniYUr+WymXUadDKqC5JlR3XC321Y9YeRq4VzW9v493kHMB65jUr9TU/Qr6cf9tveC
+X4XSQRjbgbMEHMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==
+-----END CERTIFICATE-----
+)CERT";
+static BearSSL::X509List vercelTrustAnchor(VERCEL_ROOT_CA);
 
 constexpr uint8_t RFID_SS_PIN = 2;       // D4 / GPIO2
 constexpr uint8_t RFID_RST_PIN = 0;      // D3 / GPIO0
-constexpr uint8_t GREEN_LED_PIN = 5;    // D1 / GPIO5
-constexpr uint8_t READY_LED_PIN = 4;    // D2 / GPIO4 (optional)
+constexpr uint8_t GREEN_LED_PIN = 4;    // D2 / GPIO4
 constexpr unsigned long WIFI_RETRY_MS = 10000;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = 60000;
 constexpr unsigned long LOCAL_DUPLICATE_MS = 2500;
-constexpr unsigned long SUCCESS_LED_MS = 1000;
+constexpr unsigned long SUCCESS_LED_FLASH_MS = 150;
+constexpr unsigned long UNKNOWN_CARD_FLASH_MS = 1000;
 constexpr uint16_t HTTP_TIMEOUT_MS = 5000;
 
 ESP8266WiFiMulti wifiMulti;
@@ -96,7 +125,9 @@ unsigned long greenLedOffAt = 0;
 String lastCardUid;
 
 String serverUrl(const char* path) {
-  return String(SERVER_PROTOCOL) + "://" + SERVER_HOST + ":" + SERVER_PORT + path;
+  String url = String(SERVER_PROTOCOL) + "://" + SERVER_HOST;
+  if (SERVER_PORT != 443) url += ":" + String(SERVER_PORT);
+  return url + path;
 }
 
 String uidToString(const MFRC522::Uid& uid) {
@@ -131,6 +162,7 @@ String buildJson(JsonDocument& document) {
 void addDeviceHeaders(HTTPClient& http) {
   http.addHeader("Content-Type", "application/json");
   if (DEVICE_API_KEY[0] != '\0') http.addHeader("x-device-key", DEVICE_API_KEY);
+  if (VERCEL_BYPASS_KEY[0] != '\0') http.addHeader("x-vercel-protection-bypass", VERCEL_BYPASS_KEY);
 }
 
 int postJson(const char* path, const String& body, String& responseBody) {
@@ -139,7 +171,13 @@ int postJson(const char* path, const String& body, String& responseBody) {
     return 0;
   }
 
-  WiFiClient client;
+  if (time(nullptr) < 1704067200) {
+    Serial.println("HTTPS waiting: NTP clock is not synchronized yet");
+    return 0;
+  }
+
+  BearSSL::WiFiClientSecure client;
+  client.setTrustAnchors(&vercelTrustAnchor);
   client.setTimeout(HTTP_TIMEOUT_MS);
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
@@ -162,11 +200,12 @@ int postJson(const char* path, const String& body, String& responseBody) {
   return statusCode;
 }
 
-void startSuccessLed() {
+void startGreenLedFlash(unsigned long durationMs, const char* result) {
   digitalWrite(GREEN_LED_PIN, HIGH);
   greenLedIsOn = true;
-  greenLedOffAt = millis() + SUCCESS_LED_MS;
-  Serial.println("GREEN LED ON");
+  greenLedOffAt = millis() + durationMs;
+  Serial.print("GREEN LED: ");
+  Serial.println(result);
 }
 
 void updateSuccessLed() {
@@ -203,7 +242,6 @@ void maintainWifi() {
       wifiWasConnected = true;
       heartbeatSentForConnection = false;
       configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-      digitalWrite(READY_LED_PIN, rfidReady ? HIGH : LOW);
       Serial.print("Wi-Fi connected; NodeMCU IP: ");
       Serial.println(WiFi.localIP());
       Serial.println("NTP time synchronization started");
@@ -213,7 +251,6 @@ void maintainWifi() {
 
   if (wifiWasConnected) {
     wifiWasConnected = false;
-    digitalWrite(READY_LED_PIN, LOW);
     Serial.println("Wi-Fi disconnected");
   }
 
@@ -270,6 +307,7 @@ void reportScanFailure(int statusCode, JsonDocument& response, const String& raw
 
   if (strcmp(code, "CARD_NOT_REGISTERED") == 0) {
     Serial.println("UNKNOWN CARD");
+    startGreenLedFlash(UNKNOWN_CARD_FLASH_MS, "long error flash: card not registered");
   } else if (strcmp(code, "COOLDOWN_IGNORED") == 0) {
     Serial.println("DUPLICATE SCAN: attendance was already recorded; no new LED flash");
   } else {
@@ -333,7 +371,7 @@ void sendScan(const String& uid) {
     Serial.print(" (");
     Serial.print(scanType);
     Serial.println(")");
-    startSuccessLed();
+    startGreenLedFlash(SUCCESS_LED_FLASH_MS, "short success flash: attendance recorded");
     return;
   }
 
@@ -368,8 +406,6 @@ void setup() {
 
   pinMode(GREEN_LED_PIN, OUTPUT);
   digitalWrite(GREEN_LED_PIN, LOW);
-  pinMode(READY_LED_PIN, OUTPUT);
-  digitalWrite(READY_LED_PIN, LOW);
 
   SPI.begin();
   reader.PCD_Init();
@@ -406,10 +442,7 @@ void loop() {
   }
 
   if (WiFi.status() == WL_CONNECTED && rfidReady) {
-    digitalWrite(READY_LED_PIN, HIGH);
     handleCard();
-  } else {
-    digitalWrite(READY_LED_PIN, LOW);
   }
 
   updateSuccessLed();
