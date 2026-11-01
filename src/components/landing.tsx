@@ -109,7 +109,7 @@ function NavBar({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => voi
         </Link>
 
         {/* Desktop nav */}
-        <nav style={{ display: "flex", alignItems: "center", gap: "2rem" }} className="hidden md:flex">
+        <nav style={{ alignItems: "center", gap: "2rem" }} className="hidden md:flex">
           {navLinks.map(({ href, label }) => (
             <a
               key={href}
@@ -124,7 +124,7 @@ function NavBar({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => voi
         </nav>
 
         {/* CTA */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} className="hidden md:flex">
+        <div style={{ alignItems: "center", gap: "0.5rem" }} className="hidden md:flex">
           <Link href="/login?role=student" style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.55)", textDecoration: "none", padding: "0.375rem 0.75rem", borderRadius: "980px", transition: "color 0.18s" }}
             onMouseEnter={e => (e.currentTarget.style.color = "white")}
             onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.55)")}
@@ -140,7 +140,7 @@ function NavBar({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => voi
         </div>
 
         {/* Mobile toggle */}
-        <button onClick={() => setOpen(!open)} style={{ background: "none", border: "none", color: "white", cursor: "pointer", padding: "0.25rem", display: "flex", alignItems: "center" }} className="md:hidden" aria-label="Menu">
+        <button onClick={() => setOpen(!open)} style={{ background: "none", border: "none", color: "white", cursor: "pointer", padding: "0.25rem", alignItems: "center" }} className="flex md:hidden" aria-label="Menu">
           {open ? <X size={20} /> : <Menu size={20} />}
         </button>
       </div>
@@ -719,15 +719,14 @@ export function LandingPage() {
         </div>
       </footer>
 
-      {/* Responsive overrides */}
       <style>{`
         @media (max-width: 768px) {
           .hero-grid-cols { grid-template-columns: 1fr !important; gap: 3rem !important; }
           .hero-mockup { display: none !important; }
           .two-col-grid { grid-template-columns: 1fr !important; gap: 3rem !important; }
-          .hidden.md\\:flex { display: none !important; }
         }
       `}</style>
+
     </div>
   );
 }

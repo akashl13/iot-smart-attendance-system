@@ -1,1113 +1,414 @@
 /*
-  ============================================================
-       IoT-BASED SMART ATTENDANCE MANAGEMENT SYSTEM
-       NodeMCU ESP8266 + RC522 RFID
-  ============================================================
+  SmartAttend RFID Reader
+  Board: NodeMCU ESP8266 (ESP-12E)
 
-  RFID WIRING:
+  RC522:
+    SDA/SS -> D4 / GPIO2
+    SCK    -> D5 / GPIO14
+    MOSI   -> D7 / GPIO13
+    MISO   -> D6 / GPIO12
+    RST    -> D3 / GPIO0
+    3.3V   -> 3V3 (never VIN/5V)
+    GND    -> GND
+    IRQ    -> not connected
 
-        RC522 3.3V  -> NodeMCU 3V3
-        RC522 GND   -> NodeMCU GND
-        RC522 SDA/SS-> NodeMCU D4 / GPIO2
-        RC522 SCK   -> NodeMCU D5 / GPIO14
-        RC522 MOSI  -> NodeMCU D7 / GPIO13
-        RC522 MISO  -> NodeMCU D6 / GPIO12
-        RC522 RST   -> NodeMCU D3 / GPIO0
-        RC522 IRQ   -> NOT CONNECTED
-      LED:
-        Green LED -> D1 / GPIO5
-        White LED -> D2 / GPIO4
-      IMPORTANT:
-        RC522 MUST use 3.3V (never VIN/5V).
-        RST sits on GPIO0, so disconnect RST before flashing.
-        Do not use the built-in LED: it shares GPIO2 with SDA.
-    */
+  Green LED:
+    Anode -> D1 / GPIO5 through 220-330 ohm resistor
+    Cathode -> GND
 
+  Optional legacy reader-ready LED:
+    D2 / GPIO4. Leave disconnected if not used.
+
+  Arduino libraries:
+    - ESP8266 board package (ESP8266 Arduino Core)
+    - MFRC522 by GithubCommunity
+    - ArduinoJson by Benoit Blanchon
+*/
+
+#include <ArduinoJson.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
-#include <ESP8266HTTPClient.h>
-#include <SPI.h>
 #include <MFRC522.h>
+#include <SPI.h>
+#include <time.h>
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
 
-// ============================================================
-// MULTIPLE WIFI NETWORKS
-// ============================================================
+#ifndef SMARTATTEND_WIFI_SSID
+#define SMARTATTEND_WIFI_SSID "YOUR_WIFI_SSID"
+#endif
+#ifndef SMARTATTEND_WIFI_PASSWORD
+#define SMARTATTEND_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+#endif
+#ifndef SMARTATTEND_DEVICE_API_KEY
+#define SMARTATTEND_DEVICE_API_KEY ""
+#endif
 
-struct WiFiNetwork {
+struct WifiNetwork {
   const char* ssid;
   const char* password;
 };
 
-
-const WiFiNetwork wifiNetworks[] = {
-
-  // Wi-Fi 1
-  { "Net+ Broadband", "sherryladher" },
-
-  // Wi-Fi 2
-  { "Akash's iPhone", "YOUR_WIFI_PASSWORD_2" },
-
-  // Wi-Fi 3
-  { "AirFiber-gn6AyR", "na85pfSQaXKk3uk9" },
-
-  // Wi-Fi 4
-  { "YOUR_WIFI_4", "YOUR_PASSWORD_4" },
-
-  // Wi-Fi 5
-  { "YOUR_WIFI_5", "YOUR_PASSWORD_5" }
-
+// Add additional local networks here if the reader needs roaming support.
+const WifiNetwork WIFI_NETWORKS[] = {
+  {SMARTATTEND_WIFI_SSID, SMARTATTEND_WIFI_PASSWORD},
+  {"", ""},
+  {"", ""}
 };
+const size_t WIFI_NETWORK_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
 
+// The current repository sketch used 192.168.31.173. The previously supplied
+// 192.168.137.1 is different; verify the computer's current LAN IP before upload.
+// This must be an address the NodeMCU can reach. Never use localhost here.
+const char* SERVER_HOST = "192.168.31.173";
+const uint16_t SERVER_PORT = 3000;
+const char* SERVER_PROTOCOL = "http";
 
-const int WIFI_COUNT =
-  sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
+const char* DEVICE_ID = "NODEMCU-01";
+const char* FIRMWARE_VERSION = "1.5.0";
+// Leave empty unless the backend has DEVICE_API_KEY configured, then set the same
+// value locally. Do not commit a real key.
+const char* DEVICE_API_KEY = SMARTATTEND_DEVICE_API_KEY;
 
+constexpr uint8_t RFID_SS_PIN = 2;       // D4 / GPIO2
+constexpr uint8_t RFID_RST_PIN = 0;      // D3 / GPIO0
+constexpr uint8_t GREEN_LED_PIN = 5;    // D1 / GPIO5
+constexpr uint8_t READY_LED_PIN = 4;    // D2 / GPIO4 (optional)
+constexpr unsigned long WIFI_RETRY_MS = 10000;
+constexpr unsigned long HEARTBEAT_INTERVAL_MS = 60000;
+constexpr unsigned long LOCAL_DUPLICATE_MS = 2500;
+constexpr unsigned long SUCCESS_LED_MS = 1000;
+constexpr uint16_t HTTP_TIMEOUT_MS = 5000;
 
 ESP8266WiFiMulti wifiMulti;
+MFRC522 reader(RFID_SS_PIN, RFID_RST_PIN);
 
+bool rfidReady = false;
+bool wifiWasConnected = false;
+bool heartbeatSentForConnection = false;
+bool greenLedIsOn = false;
+unsigned long lastWifiAttemptAt = 0;
+unsigned long lastHeartbeatAt = 0;
+unsigned long lastCardReadAt = 0;
+unsigned long greenLedOffAt = 0;
+String lastCardUid;
 
-// ============================================================
-// SERVER SETTINGS
-// ============================================================
-
-// Your Mac/server IP address
-const char* SERVER_HOST = "192.168.31.173";
-
-// Website backend port
-const uint16_t SERVER_PORT = 3000;
-
-// Device ID
-const char* DEVICE_ID = "NODEMCU-01";
-
-// If your backend does not require an API key,
-// leave this empty.
-const char* DEVICE_API_KEY = "";
-
-// Reported to the server on every scan and heartbeat.
-const char* FIRMWARE_VERSION = "1.4.2";
-
-
-// ============================================================
-// RFID PINS
-// ============================================================
-
-// RC522 SDA -> D4
-// D4 = GPIO2
-const uint8_t SS_PIN = 2;
-// RC522 RST -> D3
-// D3 = GPIO0
-const uint8_t RST_PIN = 0;
-
-
-// ============================================================
-// LED PINS
-// ============================================================
-
-// Green LED -> D1
-// D1 = GPIO5
-const uint8_t GREEN_LED_PIN = 5;
-// White LED -> D2
-// D2 = GPIO4
-const uint8_t WHITE_LED_PIN = 4;
-
-
-// ============================================================
-// RFID OBJECT
-// ============================================================
-
-MFRC522 reader(SS_PIN, RST_PIN);
-
-
-// RFID status
-bool rfidOk = false;
-
-// Last scanned card
-String lastUid = "";
-
-// Time of last scan
-unsigned long lastReadAt = 0;
-
-
-// ============================================================
-// UTC TIMESTAMP (ISO 8601, e.g. 2026-03-27T10:04:11Z)
-// ============================================================
-// The server clock stays authoritative. This value is only used
-// by the server to measure reader clock drift.
-String isoTimestamp() {
-  time_t nowSec = time(nullptr);
-  struct tm timeInfo;
-  gmtime_r(&nowSec, &timeInfo);
-  char buffer[32];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeInfo);
-  return String(buffer);
+String serverUrl(const char* path) {
+  return String(SERVER_PROTOCOL) + "://" + SERVER_HOST + ":" + SERVER_PORT + path;
 }
 
-// ============================================================
-// GREEN LED SUCCESS FLASH
-// ============================================================
-
-void flashAttendanceSuccess() {
-
-  for (int blink = 0; blink < 3; blink++) {
-
-    digitalWrite(
-      GREEN_LED_PIN,
-      HIGH
-    );
-
-    delay(250);
-
-    digitalWrite(
-      GREEN_LED_PIN,
-      LOW
-    );
-
-    delay(150);
+String uidToString(const MFRC522::Uid& uid) {
+  String value;
+  for (byte index = 0; index < uid.size; index++) {
+    if (index > 0) value += ' ';
+    if (uid.uidByte[index] < 0x10) value += '0';
+    value += String(uid.uidByte[index], HEX);
   }
-}
-
-
-// ============================================================
-// CONNECT TO WIFI
-// ============================================================
-
-void connectWifi() {
-
-  WiFi.mode(WIFI_STA);
-
-  Serial.println();
-  Serial.println(
-    "Adding Wi-Fi networks..."
-  );
-
-
-  // Add all networks
-
-  for (int i = 0; i < WIFI_COUNT; i++) {
-
-    wifiMulti.addAP(
-      wifiNetworks[i].ssid,
-      wifiNetworks[i].password
-    );
-
-    Serial.print(
-      "Added Wi-Fi: "
-    );
-
-    Serial.println(
-      wifiNetworks[i].ssid
-    );
-  }
-
-
-  Serial.println();
-  Serial.println(
-    "Searching for available Wi-Fi..."
-  );
-
-
-  // Wait until connected
-
-  while (
-    wifiMulti.run() != WL_CONNECTED
-  ) {
-
-    delay(500);
-
-    Serial.print(".");
-  }
-
-
-  Serial.println();
-  Serial.println();
-
-  Serial.println(
-    "=============================="
-  );
-
-  Serial.println(
-    "       WIFI CONNECTED"
-  );
-
-  Serial.println(
-    "=============================="
-  );
-
-
-  Serial.print(
-    "Network: "
-  );
-
-  Serial.println(
-    WiFi.SSID()
-  );
-
-
-  Serial.print(
-    "ESP8266 IP: "
-  );
-
-  Serial.println(
-    WiFi.localIP()
-  );
-
-
-  Serial.print(
-    "Signal: "
-  );
-
-  Serial.print(
-    WiFi.RSSI()
-  );
-
-  Serial.println(
-    " dBm"
-  );
-
-
-  Serial.println(
-    "=============================="
-  );
-}
-
-
-// ============================================================
-// RFID UID TO STRING
-// ============================================================
-
-String uidToString(MFRC522::Uid uid) {
-
-  String value = "";
-
-
-  for (
-    byte i = 0;
-    i < uid.size;
-    i++
-  ) {
-
-    if (i) {
-      value += " ";
-    }
-
-
-    if (
-      uid.uidByte[i] < 0x10
-    ) {
-
-      value += "0";
-    }
-
-
-    value += String(
-      uid.uidByte[i],
-      HEX
-    );
-  }
-
-
   value.toUpperCase();
-
-
   return value;
 }
 
+String utcTimestamp() {
+  const time_t now = time(nullptr);
+  if (now < 1704067200) return "";
 
-// ============================================================
-// SEND HEARTBEAT TO WEBSITE
-// ============================================================
+  struct tm timeInfo;
+  if (!gmtime_r(&now, &timeInfo)) return "";
 
-void sendHeartbeat() {
-
-  if (
-    WiFi.status() != WL_CONNECTED
-  ) {
-
-    return;
-  }
-
-
-  WiFiClient client;
-
-  HTTPClient http;
-
-
-  String url =
-    String("http://") +
-    SERVER_HOST +
-    ":" +
-    SERVER_PORT +
-    "/api/devices/heartbeat";
-
-
-  Serial.println();
-
-  Serial.println(
-    "Sending heartbeat..."
-  );
-
-
-  if (
-    !http.begin(client, url)
-  ) {
-
-    Serial.println(
-      "Heartbeat connection failed"
-    );
-
-    return;
-  }
-
-
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
-
-
-  if (
-    strlen(DEVICE_API_KEY)
-  ) {
-
-    http.addHeader(
-      "x-device-key",
-      DEVICE_API_KEY
-    );
-  }
-
-
-  String body =
-    String("{\"deviceId\":\"") +
-    DEVICE_ID +
-    "\",\"ipAddress\":\"" +
-    WiFi.localIP().toString() +
-    "\",\"firmwareVersion\":\"" + FIRMWARE_VERSION + "\"}";
-
-
-  int code =
-    http.POST(body);
-
-
-  Serial.print(
-    "Heartbeat HTTP: "
-  );
-
-  Serial.println(
-    code
-  );
-
-
-  http.end();
+  char buffer[25];
+  if (strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeInfo) == 0) return "";
+  return String(buffer);
 }
 
+String buildJson(JsonDocument& document) {
+  String body;
+  serializeJson(document, body);
+  return body;
+}
 
-// ============================================================
-// SEND RFID SCAN TO WEBSITE
-// ============================================================
+void addDeviceHeaders(HTTPClient& http) {
+  http.addHeader("Content-Type", "application/json");
+  if (DEVICE_API_KEY[0] != '\0') http.addHeader("x-device-key", DEVICE_API_KEY);
+}
 
-void sendScan(
-  const String& uid
-) {
+int postJson(const char* path, const String& body, String& responseBody) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("HTTP skipped: Wi-Fi disconnected");
+    return 0;
+  }
 
+  WiFiClient client;
+  client.setTimeout(HTTP_TIMEOUT_MS);
+  HTTPClient http;
+  http.setTimeout(HTTP_TIMEOUT_MS);
 
-  digitalWrite(
-    GREEN_LED_PIN,
-    LOW
-  );
+  const String url = serverUrl(path);
+  if (!http.begin(client, url)) {
+    Serial.println("HTTP failed: could not initialize client");
+    return -1;
+  }
 
+  addDeviceHeaders(http);
+  const int statusCode = http.POST(body);
+  if (statusCode > 0) {
+    responseBody = http.getString();
+  } else {
+    Serial.print("HTTP transport error: ");
+    Serial.println(http.errorToString(statusCode));
+  }
+  http.end();
+  return statusCode;
+}
 
-  // ----------------------------------------------------------
-  // CHECK WIFI
-  // ----------------------------------------------------------
+void startSuccessLed() {
+  digitalWrite(GREEN_LED_PIN, HIGH);
+  greenLedIsOn = true;
+  greenLedOffAt = millis() + SUCCESS_LED_MS;
+  Serial.println("GREEN LED ON");
+}
 
-  if (
-    WiFi.status() != WL_CONNECTED
-  ) {
+void updateSuccessLed() {
+  if (greenLedIsOn && static_cast<long>(millis() - greenLedOffAt) >= 0) {
+    digitalWrite(GREEN_LED_PIN, LOW);
+    greenLedIsOn = false;
+    Serial.println("GREEN LED OFF");
+  }
+}
 
-    Serial.println(
-      "Wi-Fi disconnected."
-    );
+void beginWifi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
 
-    Serial.println(
-      "Trying another saved network..."
-    );
+  bool hasConfiguredNetwork = false;
+  for (size_t index = 0; index < WIFI_NETWORK_COUNT; index++) {
+    if (WIFI_NETWORKS[index].ssid[0] == '\0' || strcmp(WIFI_NETWORKS[index].ssid, "YOUR_WIFI_SSID") == 0) continue;
+    wifiMulti.addAP(WIFI_NETWORKS[index].ssid, WIFI_NETWORKS[index].password);
+    hasConfiguredNetwork = true;
+  }
+  if (!hasConfiguredNetwork) {
+    Serial.println("CONFIG ERROR: copy secrets.example.h to secrets.h and set Wi-Fi credentials");
+  }
 
+  Serial.println("Connecting to configured Wi-Fi networks...");
+  wifiMulti.run();
+  lastWifiAttemptAt = millis() - WIFI_RETRY_MS;
+}
 
-    connectWifi();
+void maintainWifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wifiWasConnected) {
+      wifiWasConnected = true;
+      heartbeatSentForConnection = false;
+      configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+      digitalWrite(READY_LED_PIN, rfidReady ? HIGH : LOW);
+      Serial.print("Wi-Fi connected; NodeMCU IP: ");
+      Serial.println(WiFi.localIP());
+      Serial.println("NTP time synchronization started");
+    }
+    return;
+  }
 
+  if (wifiWasConnected) {
+    wifiWasConnected = false;
+    digitalWrite(READY_LED_PIN, LOW);
+    Serial.println("Wi-Fi disconnected");
+  }
 
-    if (
-      WiFi.status() != WL_CONNECTED
-    ) {
+  if (millis() - lastWifiAttemptAt >= WIFI_RETRY_MS) {
+    lastWifiAttemptAt = millis();
+    Serial.println("Retrying configured Wi-Fi networks...");
+    wifiMulti.run();
+  }
+}
 
-      Serial.println(
-        "Network error: Wi-Fi unavailable"
-      );
+void sendHeartbeat() {
+  StaticJsonDocument<256> request;
+  request["deviceId"] = DEVICE_ID;
+  request["ipAddress"] = WiFi.localIP().toString();
+  request["firmwareVersion"] = FIRMWARE_VERSION;
 
-      return;
+  String responseBody;
+  const int statusCode = postJson("/api/devices/heartbeat", buildJson(request), responseBody);
+  if (statusCode <= 0) {
+    Serial.println("HEARTBEAT FAILED: no HTTP response");
+    return;
+  }
+
+  StaticJsonDocument<768> response;
+  const DeserializationError parseError = deserializeJson(response, responseBody);
+  const bool success = response["success"] | false;
+  const char* deviceStatus = response["device"]["status"] | "";
+
+  if (statusCode >= 200 && statusCode < 300 && !parseError && success && strcmp(deviceStatus, "ONLINE") == 0) {
+    Serial.println("HEARTBEAT OK: backend confirms reader ONLINE");
+  } else {
+    Serial.print("HEARTBEAT FAILED HTTP ");
+    Serial.print(statusCode);
+    Serial.print(": ");
+    Serial.println(responseBody);
+  }
+}
+
+bool isNewAttendanceRecord(JsonDocument& response) {
+  const bool success = response["success"] | false;
+  const bool accepted = response["accepted"] | false;
+  const char* code = response["code"] | "";
+  const char* scanType = response["scanType"] | "";
+
+  // Cooldown acknowledgements have success=true but create no new record and
+  // deliberately omit scanType. Only the backend's recorded ENTRY/EXIT flashes.
+  const bool recordedDirection = strcmp(scanType, "ENTRY") == 0 || strcmp(scanType, "EXIT") == 0;
+  return success && accepted && recordedDirection && strcmp(code, "COOLDOWN_IGNORED") != 0;
+}
+
+void reportScanFailure(int statusCode, JsonDocument& response, const String& rawBody) {
+  const char* code = response["code"] | "";
+  const char* message = response["message"] | "";
+
+  if (strcmp(code, "CARD_NOT_REGISTERED") == 0) {
+    Serial.println("UNKNOWN CARD");
+  } else if (strcmp(code, "COOLDOWN_IGNORED") == 0) {
+    Serial.println("DUPLICATE SCAN: attendance was already recorded; no new LED flash");
+  } else {
+    Serial.print("ATTENDANCE FAILED HTTP ");
+    Serial.print(statusCode);
+    if (message[0] != '\0') {
+      Serial.print(": ");
+      Serial.println(message);
+    } else {
+      Serial.println();
+      Serial.println(rawBody);
+    }
+  }
+}
+
+void sendScan(const String& uid) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("ATTENDANCE FAILED: Wi-Fi disconnected; scan was not sent");
+    return;
+  }
+
+  StaticJsonDocument<384> request;
+  request["rfidUID"] = uid;
+  request["deviceId"] = DEVICE_ID;
+  request["scanDirection"] = "AUTO";
+  request["firmwareVersion"] = FIRMWARE_VERSION;
+  const String timestamp = utcTimestamp();
+  if (timestamp.length() > 0) request["deviceTimestamp"] = timestamp;
+
+  Serial.println("Sending RFID scan to SmartAttend backend...");
+  String responseBody;
+  const int statusCode = postJson("/api/rfid/scan", buildJson(request), responseBody);
+  if (statusCode <= 0) {
+    Serial.println("ATTENDANCE FAILED: server unavailable or request timed out");
+    return;
+  }
+
+  StaticJsonDocument<1024> response;
+  const DeserializationError parseError = deserializeJson(response, responseBody);
+  if (parseError) {
+    Serial.print("ATTENDANCE FAILED: invalid JSON response: ");
+    Serial.println(parseError.c_str());
+    return;
+  }
+
+  if (isNewAttendanceRecord(response)) {
+    const char* studentName = response["studentName"] | "Student";
+    const char* studentId = response["studentId"] | "";
+    const char* attendanceStatus = response["status"] | "recorded";
+    const char* scanType = response["scanType"] | "ENTRY";
+
+    Serial.println("ATTENDANCE SUCCESS");
+    Serial.print("Student: ");
+    Serial.println(studentName);
+    if (studentId[0] != '\0') {
+      Serial.print("Roll number: ");
+      Serial.println(studentId);
+    }
+    Serial.print("Result: ");
+    Serial.print(attendanceStatus);
+    Serial.print(" (");
+    Serial.print(scanType);
+    Serial.println(")");
+    startSuccessLed();
+    return;
+  }
+
+  reportScanFailure(statusCode, response, responseBody);
+}
+
+void handleCard() {
+  if (!rfidReady || !reader.PICC_IsNewCardPresent() || !reader.PICC_ReadCardSerial()) return;
+
+  const String uid = uidToString(reader.uid);
+  Serial.print("RFID SCANNED: ");
+  Serial.println(uid);
+
+  reader.PICC_HaltA();
+  reader.PCD_StopCrypto1();
+
+  const unsigned long now = millis();
+  if (uid == lastCardUid && now - lastCardReadAt < LOCAL_DUPLICATE_MS) {
+    Serial.println("DUPLICATE SCAN: ignored by local debounce");
+    return;
+  }
+
+  lastCardUid = uid;
+  lastCardReadAt = now;
+  sendScan(uid);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println("SmartAttend RFID Reader starting");
+
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  digitalWrite(GREEN_LED_PIN, LOW);
+  pinMode(READY_LED_PIN, OUTPUT);
+  digitalWrite(READY_LED_PIN, LOW);
+
+  SPI.begin();
+  reader.PCD_Init();
+  delay(50);
+
+  const byte version = reader.PCD_ReadRegister(MFRC522::VersionReg);
+  Serial.print("RC522 version: 0x");
+  Serial.println(version, HEX);
+  rfidReady = version == 0x91 || version == 0x92;
+  if (!rfidReady) {
+    Serial.println("RC522 ERROR: check wiring and 3.3V power");
+  } else {
+    Serial.println("RC522 ready");
+  }
+
+  beginWifi();
+  Serial.println("Setup complete; waiting for Wi-Fi and RFID cards");
+}
+
+void loop() {
+  updateSuccessLed();
+  maintainWifi();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!heartbeatSentForConnection || millis() - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
+      sendHeartbeat();
+      lastHeartbeatAt = millis();
+      heartbeatSentForConnection = true;
     }
   }
 
-
-  // ----------------------------------------------------------
-  // HTTP CLIENT
-  // ----------------------------------------------------------
-
-  WiFiClient client;
-
-  HTTPClient http;
-
-
-  String url =
-    String("http://") +
-    SERVER_HOST +
-    ":" +
-    SERVER_PORT +
-    "/api/rfid/scan";
-
-
-  Serial.println();
-
-  Serial.println(
-    "Sending RFID to server..."
-  );
-
-
-  Serial.print(
-    "URL: "
-  );
-
-  Serial.println(
-    url
-  );
-
-
-  if (
-    !http.begin(client, url)
-  ) {
-
-    Serial.println(
-      "Network error: could not open HTTP client"
-    );
-
-    return;
+  if (WiFi.status() == WL_CONNECTED && rfidReady) {
+    digitalWrite(READY_LED_PIN, HIGH);
+    handleCard();
+  } else {
+    digitalWrite(READY_LED_PIN, LOW);
   }
 
-
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
-
-
-  if (
-    strlen(DEVICE_API_KEY)
-  ) {
-
-    http.addHeader(
-      "x-device-key",
-      DEVICE_API_KEY
-    );
-  }
-
-
-  http.setTimeout(8000);
-
-
-  // JSON body
-  String body =
-    String("{\"rfidUID\":\"") +
-    uid +
-    "\",\"deviceId\":\"" +
-    DEVICE_ID +
-    "\",\"scanDirection\":\"AUTO\"" +
-    ",\"deviceTimestamp\":\"" +
-    isoTimestamp() +
-    "\",\"firmwareVersion\":\"" +
-    FIRMWARE_VERSION +
-    "\"}";
-
-
-  Serial.println(
-    "POST /api/rfid/scan"
-  );
-
-
-  Serial.print(
-    "Body: "
-  );
-
-  Serial.println(
-    body
-  );
-
-
-  // Send request
-
-  int code =
-    http.POST(body);
-
-
-  // Get response
-
-  String payload =
-    http.getString();
-
-
-  String errorText =
-    code <= 0
-      ? http.errorToString(code)
-      : "";
-
-
-  http.end();
-
-
-  // ----------------------------------------------------------
-  // NETWORK ERROR
-  // ----------------------------------------------------------
-
-  if (
-    code <= 0
-  ) {
-
-    Serial.print(
-      "Network error: "
-    );
-
-    Serial.println(
-      errorText
-    );
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // SERVER ERROR
-  // ----------------------------------------------------------
-
-  if (
-    code >= 500
-  ) {
-
-    Serial.print(
-      "Server error "
-    );
-
-    Serial.print(
-      code
-    );
-
-    Serial.print(
-      ": "
-    );
-
-    Serial.println(
-      payload
-    );
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // SUCCESS
-  // ----------------------------------------------------------
-
-  if (
-    payload.indexOf(
-      "\"success\":true"
-    ) >= 0
-    ||
-    payload.indexOf(
-      "\"success\": true"
-    ) >= 0
-  ) {
-
-    Serial.println();
-
-    Serial.println(
-      "******************************"
-    );
-
-    Serial.println(
-      " ATTENDANCE MARKED SUCCESSFULLY"
-    );
-
-    Serial.println(
-      "******************************"
-    );
-
-    Serial.println(
-      payload
-    );
-
-
-    flashAttendanceSuccess();
-
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // UNKNOWN RFID
-  // ----------------------------------------------------------
-
-  if (
-    payload.indexOf(
-      "not registered"
-    ) >= 0
-  ) {
-
-    Serial.println();
-
-    Serial.println(
-      "RFID NOT REGISTERED"
-    );
-
-    Serial.println(
-      payload
-    );
-
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // OTHER RESPONSE
-  // ----------------------------------------------------------
-
-  Serial.print(
-    "Server response HTTP "
-  );
-
-  Serial.println(
-    code
-  );
-
-  Serial.println(
-    payload
-  );
-}
-
-
-// ============================================================
-// SETUP
-// ============================================================
-
-void setup() {
-
-  Serial.begin(
-    115200
-  );
-
-
-  delay(
-    1000
-  );
-
-
-  // ----------------------------------------------------------
-  // START MESSAGE
-  // ----------------------------------------------------------
-
-  Serial.println();
-
-  Serial.println(
-    "=============================="
-  );
-
-  Serial.println(
-    " IoT SMART ATTENDANCE SYSTEM"
-  );
-
-  Serial.println(
-    "=============================="
-  );
-
-
-  // ----------------------------------------------------------
-  // LED SETUP
-  // ----------------------------------------------------------
-
-  pinMode(
-    GREEN_LED_PIN,
-    OUTPUT
-  );
-
-
-  pinMode(
-    WHITE_LED_PIN,
-    OUTPUT
-  );
-
-
-  digitalWrite(
-    GREEN_LED_PIN,
-    LOW
-  );
-
-
-  // White LED = reader ready. Starts dark; it is only lit once the
-  // RC522 has answered a valid version read in setup().
-  digitalWrite(
-    WHITE_LED_PIN,
-    LOW
-  );
-
-
-  // ----------------------------------------------------------
-  // START SPI
-  // ----------------------------------------------------------
-
-  Serial.println();
-
-  Serial.println(
-    "Starting SPI..."
-  );
-  // SCK=D5/GPIO14, MISO=D6/GPIO12, MOSI=D7/GPIO13, SS=D4/GPIO2
-  SPI.begin();
-
-
-  // ----------------------------------------------------------
-  // START RC522
-  // ----------------------------------------------------------
-
-  Serial.println(
-    "Starting RC522..."
-  );
-
-
-  reader.PCD_Init();
-
-
-  delay(
-    100
-  );
-
-
-  // ----------------------------------------------------------
-  // CHECK RC522
-  // ----------------------------------------------------------
-
-  byte version =
-    reader.PCD_ReadRegister(
-      MFRC522::VersionReg
-    );
-
-
-  Serial.print(
-    "RC522 Version: 0x"
-  );
-
-
-  Serial.println(
-    version,
-    HEX
-  );
-
-
-  /*
-    Only 0x91 and 0x92 are genuine MFRC522 part numbers. 0x82/0x88 are
-    clone/erratic reads and are rejected on purpose.
-  */
-
-  if (
-    version == 0x91 ||
-    version == 0x92
-  ) {
-
-    rfidOk = true;
-
-
-    Serial.println(
-      "RC522 detected successfully!"
-    );
-
-  }
-
-  else {
-
-    rfidOk = false;
-
-
-    Serial.println(
-      "ERROR: RC522 NOT detected!"
-    );
-
-
-    Serial.println(
-      "Check RFID wiring and 3.3V power."
-    );
-
-  }
-
-  // White LED means "reader validated and ready".
-  digitalWrite(
-    WHITE_LED_PIN,
-    rfidOk ? HIGH : LOW
-  );
-
-
-  // ----------------------------------------------------------
-  // CONNECT WIFI
-  // ----------------------------------------------------------
-
-  connectWifi();
-
-
-  // ----------------------------------------------------------
-  // SEND HEARTBEAT
-  // ----------------------------------------------------------
-
-  sendHeartbeat();
-
-
-  // ----------------------------------------------------------
-  // READY
-  // ----------------------------------------------------------
-
-  Serial.println();
-
-
-  if (rfidOk) {
-
-    Serial.println(
-      "=============================="
-    );
-
-    Serial.println(
-      " RFID SCANNER READY"
-    );
-
-    Serial.println(
-      "=============================="
-    );
-
-    Serial.println(
-      "Place RFID card on RC522..."
-    );
-
-  }
-
-  else {
-
-    Serial.println(
-      "RFID Scanner Disabled"
-    );
-  }
-}
-
-
-// ============================================================
-// MAIN LOOP
-// ============================================================
-
-void loop() {
-
-
-  // ----------------------------------------------------------
-  // WIFI CHECK
-  // ----------------------------------------------------------
-
-  if (
-    wifiMulti.run() != WL_CONNECTED
-  ) {
-
-    Serial.println();
-
-    Serial.println(
-      "Wi-Fi lost!"
-    );
-
-
-    Serial.println(
-      "Searching saved networks..."
-    );
-
-
-    // White LED = reader ready, and the reader is not ready
-    // while it cannot reach the attendance server.
-    digitalWrite(
-      WHITE_LED_PIN,
-      LOW
-    );
-
-
-    delay(
-      1000
-    );
-
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // HEARTBEAT EVERY 60 SECONDS
-  // ----------------------------------------------------------
-
-  static unsigned long lastBeat = 0;
-
-
-  if (
-    millis() - lastBeat > 60000
-  ) {
-
-    sendHeartbeat();
-
-
-    lastBeat =
-      millis();
-  }
-
-
-  // ----------------------------------------------------------
-  // RFID NOT AVAILABLE
-  // ----------------------------------------------------------
-
-  if (!rfidOk) {
-
-    digitalWrite(
-      GREEN_LED_PIN,
-      LOW
-    );
-
-    digitalWrite(
-      WHITE_LED_PIN,
-      LOW
-    );
-
-
-    delay(
-      1000
-    );
-
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // CHECK RFID CARD
-  // ----------------------------------------------------------
-
-  // Wi-Fi is back and the RC522 answered a valid version read,
-  // so the reader is ready again.
-  digitalWrite(
-    WHITE_LED_PIN,
-    HIGH
-  );
-
-
-  if (
-    !reader.PICC_IsNewCardPresent()
-  ) {
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // READ RFID CARD
-  // ----------------------------------------------------------
-
-  if (
-    !reader.PICC_ReadCardSerial()
-  ) {
-
-    return;
-  }
-
-
-  // ----------------------------------------------------------
-  // GET CARD UID
-  // ----------------------------------------------------------
-
-  String uid =
-    uidToString(
-      reader.uid
-    );
-
-
-  Serial.println();
-
-  Serial.println(
-    "=============================="
-  );
-
-  Serial.println(
-    " RFID CARD DETECTED"
-  );
-
-
-  Serial.print(
-    "UID: "
-  );
-
-
-  Serial.println(
-    uid
-  );
-
-
-  Serial.println(
-    "=============================="
-  );
-
-
-  // ----------------------------------------------------------
-  // NO LED HERE ON PURPOSE.
-  // The green LED is driven only by flashAttendanceSuccess() after
-  // the server accepts a registered card. Blinking it on detection
-  // would light up for unknown or blocked cards too.
-  // ----------------------------------------------------------
-
-
-  // ----------------------------------------------------------
-  // STOP RFID COMMUNICATION
-  // ----------------------------------------------------------
-
-  reader.PICC_HaltA();
-
-  reader.PCD_StopCrypto1();
-
-
-  // ----------------------------------------------------------
-  // PREVENT DUPLICATE SCANS
-  // ----------------------------------------------------------
-
-  if (
-    uid == lastUid &&
-    millis() - lastReadAt < 2500
-  ) {
-
-    return;
-  }
-
-
-  lastUid =
-    uid;
-
-
-  lastReadAt =
-    millis();
-
-
-  // ----------------------------------------------------------
-  // SEND TO WEBSITE
-  // ----------------------------------------------------------
-
-  sendScan(
-    uid
-  );
-
-
-  delay(
-    400
-  );
+  updateSuccessLed();
+  yield();
 }

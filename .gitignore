@@ -10,6 +10,9 @@ node_modules/
 .env.test.local
 .env.production.local
 
+# Local NodeMCU Wi-Fi and device credentials
+nodemcu_rfid/secrets.h
+
 # Next.js
 .next/
 out/

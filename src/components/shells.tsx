@@ -6,6 +6,7 @@ import {
   BookOpen,
   Building2,
   CalendarCheck,
+  ChevronDown,
   Cpu,
   FileBarChart,
   GraduationCap,
@@ -31,17 +32,20 @@ type ShellUser = { name: string; email: string; role: string };
 const adminLinks = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/students", label: "Students", icon: Users },
-  { href: "/admin/rfid", label: "RFID Management", icon: ScanLine },
-  { href: "/admin/attendance", label: "Attendance", icon: CalendarCheck },
   { href: "/admin/attendance/live", label: "Live Attendance", icon: Radio },
+  { href: "/admin/attendance", label: "Attendance Records", icon: CalendarCheck },
+  { href: "/admin/rfid", label: "RFID Cards", icon: ScanLine },
+  { href: "/admin/devices", label: "IoT Devices", icon: Cpu },
+  { href: "/admin/reports", label: "Reports", icon: FileBarChart },
+  { href: "/admin/settings", label: "Settings", icon: Settings },
+];
+
+const adminMoreLinks = [
+  { href: "/admin/departments", label: "Departments", icon: Building2 },
   { href: "/admin/subjects", label: "Subjects", icon: BookOpen },
   { href: "/admin/teachers", label: "Teachers", icon: GraduationCap },
-  { href: "/admin/departments", label: "Departments", icon: Building2 },
-  { href: "/admin/devices", label: "IoT Devices", icon: Cpu },
   { href: "/admin/iot", label: "IoT Control Center", icon: Sparkles },
-  { href: "/admin/reports", label: "Reports", icon: FileBarChart },
   { href: "/admin/notifications", label: "Notifications", icon: Bell },
-  { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
 const studentLinks = [
@@ -52,10 +56,9 @@ const studentLinks = [
 ];
 
 const adminSections = [
-  { label: "Overview", links: adminLinks.slice(0, 2) },
-  { label: "Management", links: adminLinks.slice(2, 8) },
-  { label: "IoT & System", links: adminLinks.slice(8, 11) },
-  { label: "Account", links: adminLinks.slice(11) },
+  { label: "Main", links: adminLinks.slice(0, 4) },
+  { label: "Operations", links: adminLinks.slice(4) },
+  { label: "More tools", links: adminMoreLinks },
 ];
 
 function useClock() {
@@ -106,7 +109,7 @@ export function AdminShell({
       user={user}
       links={adminLinks}
       home="/admin/dashboard"
-      bottom={[adminLinks[0], adminLinks[1], adminLinks[8], adminLinks[9]]}
+      bottom={adminLinks.slice(0, 4)}
       sections={adminSections}
     >
       {children}
@@ -320,21 +323,8 @@ function AppShell({
 
       {/* Navigation */}
       <nav style={{ flex: 1, overflowY: "auto", padding: "0.5rem 0.625rem" }}>
-        {sections.map(({ label, links: sectionLinks }) => (
-          <div key={label} style={{ marginBottom: "0.25rem" }}>
-            <p
-              style={{
-                fontSize: "0.6875rem",
-                fontWeight: 700,
-                letterSpacing: "0.07em",
-                textTransform: "uppercase",
-                color: "rgba(255,255,255,0.28)",
-                padding: "0.625rem 0.625rem 0.25rem",
-              }}
-            >
-              {label}
-            </p>
-            {sectionLinks.map((link) => {
+        {sections.map(({ label, links: sectionLinks }) => {
+          const sectionItems = sectionLinks.map((link) => {
               const active = pathname === link.href;
               const Icon = link.icon;
               return (
@@ -400,24 +390,38 @@ function AppShell({
                     }}
                   />
                   <span>{link.label}</span>
-                  {link.href === "/admin/attendance/live" && (
-                    <span
-                      style={{
-                        marginLeft: "auto",
-                        width: "6px",
-                        height: "6px",
-                        borderRadius: "50%",
-                        background: "#30d158",
-                        animation: "pulse-ring 2.4s infinite",
-                        flexShrink: 0,
-                      }}
-                    />
-                  )}
                 </Link>
               );
-            })}
-          </div>
-        ))}
+          });
+          if (label === "More tools") {
+            return (
+              <details key={label} className="nav-more-tools" open={sectionLinks.some((link) => pathname === link.href)}>
+                <summary className="nav-more-tools-summary">
+                  <span>{label}</span>
+                  <ChevronDown size={15} />
+                </summary>
+                <div>{sectionItems}</div>
+              </details>
+            );
+          }
+          return (
+            <div key={label} style={{ marginBottom: "0.25rem" }}>
+              <p
+                style={{
+                  fontSize: "0.6875rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.07em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.28)",
+                  padding: "0.625rem 0.625rem 0.25rem",
+                }}
+              >
+                {label}
+              </p>
+              {sectionItems}
+            </div>
+          );
+        })}
       </nav>
 
       {/* Logout */}
