@@ -171,6 +171,7 @@ function NavBar({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => voi
 function RFIDMockup() {
   return (
     <div
+      className="landing-rfid-card"
       style={{
         background: "#111111",
         border: "1px solid rgba(255,255,255,0.09)",
@@ -311,7 +312,7 @@ export function LandingPage() {
   const heroY = useTransform(scrollYProgress, [0, 1], [0, 60]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f7", color: "#1d1d1f", overflowX: "hidden" }}>
+    <div className="landing-root" style={{ minHeight: "100vh", background: "#f5f5f7", color: "#1d1d1f", overflowX: "hidden" }}>
       <NavBar open={open} setOpen={setOpen} />
 
       {/* ── HERO ──────────────────────────────────────────── */}

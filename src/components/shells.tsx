@@ -10,6 +10,7 @@ import {
   Cpu,
   FileBarChart,
   GraduationCap,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -41,6 +42,7 @@ const adminLinks = [
 ];
 
 const adminMoreLinks = [
+  { href: "/admin/accounts", label: "Student accounts", icon: KeyRound },
   { href: "/admin/departments", label: "Departments", icon: Building2 },
   { href: "/admin/subjects", label: "Subjects", icon: BookOpen },
   { href: "/admin/teachers", label: "Teachers", icon: GraduationCap },

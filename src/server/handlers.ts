@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import { db } from "@/db";
 import {
   attendance,
@@ -185,6 +186,35 @@ export async function passwordHandler(req: Request) {
     if (!user || !(await verifyPassword(parsed.data.currentPassword, user.passwordHash))) return fail("Current password is incorrect.", 400);
     await db.update(users).set({ passwordHash: await hashPassword(parsed.data.newPassword) }).where(eq(users.id, user.id));
     return ok({ message: "Password updated." });
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+/** Admin-only directory for student login IDs and one-time password resets. */
+export async function studentAccountsHandler(req: Request) {
+  try {
+    const auth = await requireUser(["ADMIN"], req);
+    if (auth.error) return auth.error;
+    if (req.method === "GET") {
+      const url = new URL(req.url);
+      const { page, limit, offset } = pageParams(url, 20);
+      const q = searchTerm(url.searchParams.get("search"));
+      const filter = q ? or(ilike(students.name, q), ilike(students.studentCode, q), ilike(students.email, q), ilike(users.email, q)) : undefined;
+      const query = db.select({ id: students.id, studentId: students.studentCode, name: students.name, email: users.email, status: students.status })
+        .from(students).innerJoin(users, eq(students.userId, users.id));
+      const rows = await (filter ? query.where(filter) : query).orderBy(asc(students.name)).limit(limit).offset(offset);
+      const [total] = await (filter ? db.select({ total: count() }).from(students).innerJoin(users, eq(students.userId, users.id)).where(filter) : db.select({ total: count() }).from(students));
+      return ok({ accounts: rows, page, pages: Math.max(1, Math.ceil(Number(total.total) / limit)), total: Number(total.total) });
+    }
+    const body = await readBody<{ studentId?: number }>(req);
+    const id = Number(body.studentId);
+    if (!Number.isSafeInteger(id) || id < 1) return fail("Choose a valid student account.");
+    const [student] = await db.select({ userId: students.userId }).from(students).where(eq(students.id, id)).limit(1);
+    if (!student) return fail("Student account not found.", 404);
+    const temporaryPassword = randomBytes(15).toString("base64url");
+    await db.update(users).set({ passwordHash: await hashPassword(temporaryPassword) }).where(eq(users.id, student.userId));
+    return ok({ temporaryPassword, message: "Temporary password created. Copy it now; it will not be shown again." });
   } catch (error) {
     return handleError(error);
   }
