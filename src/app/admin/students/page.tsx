@@ -171,6 +171,41 @@ export default function StudentsPage() {
       .catch((error) => toast.error(error.message));
   }, [toast]);
 
+  // The account directory can deep-link straight into this existing editor.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get("edit");
+    if (!editId) return;
+    window.history.replaceState({}, "", "/admin/students");
+    let cancelled = false;
+    api<{ student: Record<string, unknown> }>(`/api/students/${encodeURIComponent(editId)}`)
+      .then(({ student }) => {
+        if (cancelled) return;
+        openEdit({
+          id: Number(student.id),
+          studentId: String(student.studentId ?? student.studentCode ?? ""),
+          name: String(student.name ?? ""),
+          email: String(student.email ?? ""),
+          phone: String(student.phone ?? ""),
+          department: String(student.department ?? ""),
+          departmentId: Number(student.departmentId),
+          course: String(student.course ?? ""),
+          courseId: Number(student.courseId),
+          semester: Number(student.semester),
+          section: String(student.section ?? "A"),
+          rfid: typeof student.rfidUid === "string" ? student.rfidUid : null,
+          rfidStatus: String(student.rfidStatus ?? "NOT REGISTERED"),
+          attendance: Number(student.attendance ?? 0),
+          status: String(student.status ?? "ACTIVE"),
+          enrollmentNumber: String(student.enrollmentNumber ?? ""),
+          gender: typeof student.gender === "string" ? student.gender : undefined,
+          dateOfBirth: typeof student.dateOfBirth === "string" ? student.dateOfBirth : undefined,
+        });
+      })
+      .catch((error) => toast.error(error instanceof ApiError ? error.message : "Could not open student editor"));
+    return () => { cancelled = true; };
+  }, [toast]);
+
   useEffect(() => {
     const id = setTimeout(() => { void load(page).catch((error) => toast.error(error.message)); }, 0);
     return () => clearTimeout(id);

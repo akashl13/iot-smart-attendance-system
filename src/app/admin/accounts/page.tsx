@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, KeyRound, Search, UsersRound } from "lucide-react";
+import { Check, Copy, KeyRound, Pencil, Search, UsersRound } from "lucide-react";
+import Link from "next/link";
 import { useToast } from "@/components/providers";
 import { LoadingState, PageHeader } from "@/components/ui";
 import { ApiError, api } from "@/lib/api-client";
@@ -65,6 +66,11 @@ export default function StudentAccountsPage() {
         <p>Passwords are stored as secure hashes, so current passwords cannot be viewed. A reset replaces the old password and reveals a new temporary password once. Share it privately and ask the student to change it in their profile.</p>
       </section>
 
+      <section className="account-edit-callout panel-glass">
+        <div><strong>Update a student profile</strong><p>Edit name, email, phone, student ID, course, semester, enrollment, status, or RFID details. Saving writes the changes to the configured Neon database.</p></div>
+        <Link className="btn btn-secondary btn-sm" href="/admin/students"><Pencil size={15} /> Open student editor</Link>
+      </section>
+
       {issued && (
         <section className="account-issued panel-glass" aria-live="polite">
           <div><span className="account-kicker">Temporary password · shown once</span><strong>{issued.password}</strong></div>
@@ -79,7 +85,7 @@ export default function StudentAccountsPage() {
         </div>
         <div className="table-wrap account-table-wrap">
           <table className="data">
-            <thead><tr><th>Student</th><th>Student ID</th><th>Login ID · Email</th><th>Status</th><th>Access</th></tr></thead>
+            <thead><tr><th>Student</th><th>Student ID</th><th>Login ID · Email</th><th>Status</th><th>Manage</th></tr></thead>
             <tbody>
               {data.accounts.map((account) => (
                 <tr key={account.id}>
@@ -87,7 +93,7 @@ export default function StudentAccountsPage() {
                   <td><span className="account-id">{account.studentId}</span></td>
                   <td>{account.email}</td>
                   <td><span className={`account-status ${account.status === "ACTIVE" ? "is-active" : "is-inactive"}`}>{account.status}</span></td>
-                  <td><button className="btn btn-secondary btn-sm" disabled={busyId === account.id} onClick={() => void resetPassword(account)}>{busyId === account.id ? "Resetting…" : "Reset password"}</button></td>
+                  <td><div className="account-row-actions"><Link className="btn btn-secondary btn-sm" href={`/admin/students?edit=${account.id}`}><Pencil size={14} /> Edit details</Link><button className="btn btn-secondary btn-sm" disabled={busyId === account.id} onClick={() => void resetPassword(account)}>{busyId === account.id ? "Resetting…" : "Reset password"}</button></div></td>
                 </tr>
               ))}
               {!data.accounts.length && <tr><td colSpan={5} className="account-empty">No student accounts match that search.</td></tr>}

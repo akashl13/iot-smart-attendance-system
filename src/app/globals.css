@@ -746,6 +746,10 @@ body {
 .account-status.is-active { color: #187647; background: rgba(48,209,88,.12); }
 .account-status.is-inactive { color: #9b4d11; background: rgba(255,159,10,.14); }
 .account-empty { padding: 2rem !important; color: #747b88 !important; text-align: center; }
+.account-edit-callout { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.125rem; }
+.account-edit-callout strong { color: #263449; font-size: .9rem; }
+.account-edit-callout p { margin-top: .2rem; color: #6f7887; font-size: .8rem; line-height: 1.5; }
+.account-row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
 .account-pagination { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: .9rem; color: #777e8c; font-size: .8rem; }
 .account-pagination > div { display: flex; gap: .5rem; }
 .landing-rfid-card { background: rgba(23, 26, 34, .72) !important; backdrop-filter: blur(28px) saturate(170%); -webkit-backdrop-filter: blur(28px) saturate(170%); border-color: rgba(255,255,255,.18) !important; box-shadow: 0 28px 90px rgba(0,0,0,.48), 0 0 0 1px rgba(255,255,255,.07) inset !important; }
@@ -758,6 +762,7 @@ body {
   .account-toolbar { align-items: stretch; flex-direction: column; }
   .account-search { width: 100%; }
   .account-directory { padding: .85rem; }
+  .account-edit-callout { align-items: flex-start; flex-direction: column; }
 }
 
 /* ─── Focus ring override ─────────────────────────────────  */
