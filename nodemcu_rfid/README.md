@@ -27,10 +27,10 @@ Install Arduino IDE 2, then:
 2. In Boards Manager, install **ESP8266 by ESP8266 Community**.
 3. In Library Manager, install **MFRC522 by GithubCommunity** and **ArduinoJson by Benoit Blanchon**.
 4. From the repository root, run `cp nodemcu_rfid/secrets.example.h nodemcu_rfid/secrets.h`, then set the Wi-Fi SSID/password in `secrets.h`. It is ignored by git; do not commit it.
-5. In `nodemcu_rfid.ino`, set `SERVER_HOST` to the current IPv4 address of the computer running SmartAttend and keep `SERVER_PORT` at the backend port. The repository's previous sketch used `192.168.31.173`; the earlier reported `192.168.137.1` is different and was not verified from this Codespace. Use the address assigned on the network the NodeMCU actually shares with the backend.
+5. In `nodemcu_rfid.ino`, set `SERVER_HOST` to the current IPv4 address of the computer running SmartAttend and keep `SERVER_PORT` at the backend port. The latest reader log shows `192.168.137.152`; the previously supplied laptop address `192.168.137.1` is now the default. Verify that address on the computer before upload.
 6. If the backend environment sets `DEVICE_API_KEY`, put the same value in local `secrets.h` as `SMARTATTEND_DEVICE_API_KEY`. Otherwise leave it empty.
 
-The server address must not be `localhost`: that would refer to the NodeMCU itself. The ESP8266 and a LAN-hosted backend must be routable to each other, and the computer firewall must allow inbound TCP on the backend port. A Codespaces container is cloud-hosted; a private `192.168.x.x` address on your local Wi-Fi will not route to it. For physical hardware, run the backend on an accessible LAN host or configure a reachable tunnel/deployment. This sketch currently uses plain HTTP for a trusted local network.
+The server address must not be `localhost`: that would refer to the NodeMCU itself. The ESP8266 and a LAN-hosted backend must be routable to each other, and the computer firewall must allow inbound TCP on the backend port. A connection check from this Codespace to `192.168.137.1:3000` timed out, so the cloud container cannot reach that private LAN address. The `.137.1` default works only when SmartAttend is running on a host the reader can reach; for a Codespaces backend, deploy it or expose a reachable endpoint. This sketch currently uses plain HTTP for a trusted local network and does not implement TLS for a public HTTPS tunnel.
 
 ## Upload And Monitor
 
@@ -145,6 +145,7 @@ Example heartbeat response:
 ## Troubleshooting
 
 - **RC522 not detected:** Check SPI pin mapping and 3.3V/GND. Do not power the reader from 5V. Use short jumper wires.
+- **RC522 reports version `0x82`:** The sketch recognizes it as an unverified clone and attempts reads; this does not certify the module. If cards still do not read, check wiring/power or try a genuine MFRC522 module.
 - **Board will not flash or boot:** Disconnect RC522 RST from D3/GPIO0 while flashing. D3 and D4 are boot-strapping pins; keep the wiring as specified.
 - **Wi-Fi keeps reconnecting:** ESP8266 supports 2.4GHz Wi-Fi only. Check local `secrets.h`, signal strength, and that the SSID is not a 5GHz-only network.
 - **HTTP timeout or connection refused:** Confirm `SERVER_HOST` is the current reachable host IP, port 3000 is allowed by its firewall, and SmartAttend is running. Do not use `localhost` or a Codespaces container IP from a local device.

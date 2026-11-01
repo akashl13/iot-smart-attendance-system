@@ -60,10 +60,9 @@ const WifiNetwork WIFI_NETWORKS[] = {
 };
 const size_t WIFI_NETWORK_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
 
-// The current repository sketch used 192.168.31.173. The previously supplied
-// 192.168.137.1 is different; verify the computer's current LAN IP before upload.
-// This must be an address the NodeMCU can reach. Never use localhost here.
-const char* SERVER_HOST = "192.168.31.173";
+// Matches the previously supplied laptop host and the reader's current
+// 192.168.137.x subnet. Verify the host IP before upload. Never use localhost.
+const char* SERVER_HOST = "192.168.137.1";
 const uint16_t SERVER_PORT = 3000;
 const char* SERVER_PROTOCOL = "http";
 
@@ -379,11 +378,15 @@ void setup() {
   const byte version = reader.PCD_ReadRegister(MFRC522::VersionReg);
   Serial.print("RC522 version: 0x");
   Serial.println(version, HEX);
-  rfidReady = version == 0x91 || version == 0x92;
-  if (!rfidReady) {
-    Serial.println("RC522 ERROR: check wiring and 3.3V power");
-  } else {
+  const bool genuineVersion = version == 0x91 || version == 0x92;
+  const bool unverifiedCompatibleClone = version == 0x82;
+  rfidReady = genuineVersion || unverifiedCompatibleClone;
+  if (unverifiedCompatibleClone) {
+    Serial.println("RC522 version 0x82: unverified clone; attempting card reads");
+  } else if (genuineVersion) {
     Serial.println("RC522 ready");
+  } else {
+    Serial.println("RC522 ERROR: check wiring and 3.3V power");
   }
 
   beginWifi();
